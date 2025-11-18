@@ -1,0 +1,337 @@
+#+TITLE: RAG
+#+PROPERTY: header-args:jupyter-python+ :session rag :kernel ai-agents-crash-course-aJYnLVQA-py3.13 :display plain
+
+* Setup
+
+** Virtual env
+
+#+begin_src emacs-lisp :results silent
+  (pyvenv-workon "ai-agents-crash-course-aJYnLVQA-py3.13")
+#+end_src
+
+
+* Retrieval-Augmented Generation (RAG)
+:PROPERTIES:
+:CUSTOM_ID: retrieval-augmented-generation-rag
+:END:
+
+#+begin_src jupyter-python
+  import chromadb
+  import dotenv
+  from pathlib import Path
+  from agents import Agent, Runner, function_tool, trace
+
+  dotenv.load_dotenv()
+#+end_src
+
+#+RESULTS:
+: True
+
+Create a static calorie table that we can use as a tool:
+
+#+begin_src jupyter-python :results silent
+  # We populated the RAG with the data from the data/calories.csv file in
+  # the rag_setup.ipynb notebook
+
+  chroma_client = chromadb.PersistentClient("../chroma")
+
+  nutrition_db = chroma_client.get_collection(name="nutrition_db")
+#+end_src
+
+#+begin_src jupyter-python :results output
+  results = nutrition_db.query(query_texts=["banana"], n_results=2)
+  for i, doc in enumerate(results["documents"][0]):
+      print(sorted(results["metadatas"][0][i].items()))
+      print(doc)
+      print("\n")
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  [('calories_per_100g', 89.0), ('food_category', 'fruits'), ('food_item', 'banana'), ('keywords', 'banana_fruits'), ('kj_per_100g', 374.0), ('serving_info', '100g')]
+  Food: Banana
+          Category: Fruits
+          Nutritional Information:
+          - Calories: 89 per 100g
+          - Energy: 374 kJ per 100g
+          - Serving size reference: 100g
+
+          This is a fruits food item that provides 89 calories per 100 grams.
+
+
+  [('calories_per_100g', 50.0), ('food_category', '(fruit)juices'), ('food_item', 'banana juice'), ('keywords', 'banana_juice_(fruit)juices'), ('kj_per_100g', 210.0), ('serving_info', '100ml')]
+  Food: Banana Juice
+          Category: (Fruit)Juices
+          Nutritional Information:
+          - Calories: 50 per 100g
+          - Energy: 210 kJ per 100g
+          - Serving size reference: 100ml
+
+          This is a (fruit)juices food item that provides 50 calories per 100 grams.
+#+end_example
+
+#+begin_src jupyter-python :results silent
+  @function_tool
+  def calorie_lookup_tool(query: str, max_results: int = 3) -> str:
+      """
+      Tool function for a RAG database to look up calorie information for specific food items, but not for meals.
+
+      Args:
+          query: The food item to look up.
+          max_results: The maximum number of results to return.
+
+      Returns:
+          A string containing the nutrition information.
+      """
+
+      results = nutrition_db.query(query_texts=[query], n_results=max_results)
+
+      if not results["documents"][0]:
+          return f"No nutrition information found for: {query}"
+
+      # Format results for the agent
+      formatted_results = []
+      for i, doc in enumerate(results["documents"][0]):
+          metadata = results["metadatas"][0][i]
+          food_item = metadata["food_item"].title()
+          calories = metadata["calories_per_100g"]
+          category = metadata["food_category"].title()
+
+          formatted_results.append(
+              f"{food_item} ({category}): {calories} calories per 100g"
+          )
+
+      return "Nutrition Information:\n" + "\n".join(formatted_results)
+#+end_src
+
+Let's test this out:
+
+/The following cell only works before you add the =@function_tool=
+annotation to =calorie_lookup_tool= function/
+
+#+begin_src jupyter-python :results output
+  # print(calorie_lookup_tool('bananas'))
+#+end_src
+
+#+RESULTS:
+: Nutrition Information:
+: Banana (Fruits): 89.0 calories per 100g
+: Banana Juice ((Fruit)Juices): 50.0 calories per 100g
+: Banana Nut Bread (Pastries,Breads&Rolls): 326.0 calories per 100g
+
+#+begin_comment
+Note that the search string here is "bananas" (plural), not "banana".
+Because we're searching a vector database, the relevant documents are found
+anyway.
+#+end_comment
+
+Add the =@function_tool= annotation and re-evaluate the cell. Now we can
+set up the agent:
+
+#+begin_src jupyter-python :results silent
+  calorie_agent = Agent(
+      name="Nutrition Assistant",
+      instructions="""
+      You are a helpful nutrition assistant giving out calorie information.
+      You give concise answers.
+      If you need to look up calorie information, use the calorie_lookup_tool.
+      """,
+      tools=[calorie_lookup_tool]
+  )
+#+end_src
+
+#+begin_src jupyter-python :result output
+with trace("Nutrition Assistant with RAG"):
+    result = await Runner.run(
+        calorie_agent,
+        "How many calories are in total in a banana and an apple? Also give calories per 100g",
+    )
+    print(result.final_output)
+#+end_src
+
+#+RESULTS:
+: - Banana: 89 kcal per 100 g; ~105 kcal for a medium banana (~118 g)
+: - Apple: 52 kcal per 100 g; ~95 kcal for a medium apple (~182 g)
+: - Total (one medium banana + one medium apple): ~200 kcal
+
+* Assignment
+
+Add a nutrition lookup tool to the agent. This should be an agent that
+handles nutrition-related questions. It is especially trained for questions
+regarding malnutrition and pregnancy.
+
+First, we need to set up a collection for the =nutrition_qna= database.
+
+#+begin_src jupyter-python :results silent
+  nutrition_qna = chroma_client.get_collection(name="nutrition_qna")
+#+end_src
+
+Let's see what this brings us:
+
+#+begin_src jupyter-python :results output
+  results = nutrition_qna.query(query_texts=["banana"], n_results=2)
+  for i, doc in enumerate(results["documents"][0]):
+      print(sorted(results["metadatas"][0][i].items()))
+      print(doc)
+      print("\n")
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  [('is_pregnancy', False)]
+  Question: What is the recommended amount of bananas I should consume to count it as a single serving?
+          Answer: One small-sized banana can be counted as a single serving.
+
+          This Q&A pair provides information about nutrition and health topics.
+
+
+  [('is_pregnancy', False)]
+  Question: Which food is recommended for infants after they've been introduced to ripe bananas and sweet potatoes?
+          Answer: Introduce porridge made from wheat flour or ground rice, starting with only one cereal. Once a week has passed, you may increase the frequency of this new food to two feedings per day.
+
+          This Q&A pair provides information about nutrition and health topics.
+#+end_example
+
+Let's also try a different question:
+
+#+begin_src jupyter-python :results output
+  results = nutrition_qna.query(query_texts=["What foods should be avoided when pregnant?"], n_results=2)
+  for i, doc in enumerate(results["documents"][0]):
+      print(sorted(results["metadatas"][0][i].items()))
+      print(doc)
+      print("\n")
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  [('is_pregnancy', True)]
+  Question: What dietary recommendations are there for expectant mothers?
+          Answer: A pregnant woman is advised to consume a range of nourishing food items, such as cereals and millets, dairy or meat-based protein sources like eggs or milk, leafy greens, fruits rich in vitamin C, and other vegetables and fruits. She should also increase her intake of these foods to support her nutritional requirements.
+
+          This Q&A pair provides information about nutrition and health topics.
+
+
+  [('is_pregnancy', True)]
+  Question: Which foods should pregnant women avoid?
+          Answer: Avoiding raw or undercooked meats, unpasteurized dairy products, certain types of fish high in mercury and deli meat can reduce the risk of foodborne illnesses for pregnant women.
+
+          This Q&A pair provides information about nutrition and health topics.
+#+end_example
+
+That appears to work. Now create a tool that uses this collection:
+
+#+begin_src jupyter-python :results silent
+  @function_tool
+  def nutrition_qna_lookup_tool(query: str, max_results: int = 3) -> str:
+      """Tool function for a RAG database to look up nutrition-related questions,
+      specifically regarding malnutrition and nutrition during pregnancy..
+
+      Args:
+          query: The question to look up.
+          max_results: The maximum number of results to return.
+
+      Returns:
+          A string containing question and answer pairs related to the query.
+
+      """
+
+      results = nutrition_qna.query(query_texts=[query], n_results=max_results)
+
+      if not results["documents"][0]:
+          return f"No relevant information found for: {query}"
+
+      # Format results for the agent
+      formatted_results = []
+      for i, doc in enumerate(results["documents"][0]):
+          pregnancy = "yes" if results["metadatas"][0][i]["is_pregnancy"] else "no"
+
+          formatted_results.append(
+              f"{doc}\n\nPregnancy-related: {pregnancy}"
+          )
+
+      return f"""Questions related to the query:
+
+      {query}
+
+  ----------
+      
+  """ + "\n\n----------\n".join(formatted_results)
+#+end_src
+
+Let's try out the function first:
+
+#+begin_src jupyter-python :results output
+  print(nutrition_qna_lookup_tool("What food should pregnant women avoid?"))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Questions related to the query:
+
+      What food should pregnant women avoid?
+
+  ----------
+
+  Question: What dietary recommendations are there for expectant mothers?
+          Answer: A pregnant woman is advised to consume a range of nourishing food items, such as cereals and millets, dairy or meat-based protein sources like eggs or milk, leafy greens, fruits rich in vitamin C, and other vegetables and fruits. She should also increase her intake of these foods to support her nutritional requirements.
+
+          This Q&A pair provides information about nutrition and health topics.
+
+  Pregnancy-related: yes
+
+  ----------
+  Question: Which foods should pregnant women avoid?
+          Answer: Avoiding raw or undercooked meats, unpasteurized dairy products, certain types of fish high in mercury and deli meat can reduce the risk of foodborne illnesses for pregnant women.
+
+          This Q&A pair provides information about nutrition and health topics.
+
+  Pregnancy-related: yes
+
+  ----------
+  Question: What types of food are recommended for a pregnant woman's diet?
+          Answer: A pregnant lady should focus on incorporating various edibles in her meals, such as whole grains like cereals and millets, dairy or animal proteins from sources like milk, meat, fish, and eggs, protective veggies and fruits packed with vitamin C, dark green leafy vegetables, along with other produce. She should aim to consume more of these items to meet her nutritional demands.
+
+          This Q&A pair provides information about nutrition and health topics.
+
+  Pregnancy-related: yes
+#+end_example
+
+Now that we know it works and tweaked the output, let's define an agent
+that includes this tool and the =calorie_lookup_tool= defined above:
+
+#+begin_src jupyter-python :results silent
+  nutrition_assistant_agent = Agent(
+      name="Nutrition Assistant",
+      instructions="""
+      You are a helpful nutrition assistant giving out nutrition information.
+
+      You give concise answers.
+
+      If you need to look up calorie information, use the calorie_lookup_tool.
+
+      If you need to answer questions about malnutrition or nutrition during
+      pregnancy, use the nutrition_qna_lookup_tool.
+      """,
+      tools=[calorie_lookup_tool, nutrition_qna_lookup_tool]
+  )
+#+end_src
+
+Now let's try it:
+
+#+begin_src jupyter-python :results output
+  with trace("Nutrition Assistant with RAG"):
+      result = await Runner.run(
+          nutrition_assistant_agent,
+          "Would bananas be a healthy food for a pregnant woman, and how many calories would be in one banana?",
+      )
+      print(result.final_output)
+#+end_src
+
+#+RESULTS:
+: Yes. Bananas are a healthy, convenient snack during pregnancy and provide potassium, vitamin B6, and fiber.
+: 
+: Calories:
+: - About 89 kcal per 100 g
+: - A medium banana (~118 g) ≈ 105 kcal
+: 
+: Tips: choose ripe bananas for easier digestion; monitor total sugar if you have gestational diabetes.

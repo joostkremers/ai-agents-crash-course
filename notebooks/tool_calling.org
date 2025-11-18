@@ -1,0 +1,116 @@
+#+TITLE: Tool Calling
+#+PROPERTY: header-args:jupyter-python+ :session tool_calling :kernel ai-agents-crash-course-aJYnLVQA-py3.13 :display plain
+
+* Setup
+
+** Virtual env
+
+#+begin_src emacs-lisp :results silent
+  (pyvenv-workon "ai-agents-crash-course-aJYnLVQA-py3.13")
+#+end_src
+
+* Tool Calling
+:PROPERTIES:
+:CUSTOM_ID: tool-calling
+:END:
+
+#+begin_src jupyter-python :results silent
+  import dotenv
+  from agents import Agent, ModelSettings, Runner, function_tool, trace
+
+  dotenv.load_dotenv()
+#+end_src
+
+Create a static calorie table that we can use as a tool:
+
+#+begin_src jupyter-python :results silent
+  @function_tool
+  def get_food_calories(food_item: str) -> str:
+      """
+      Get calorie information for common foods to help with nutrition tracking.
+
+      Args:
+          food_item: Name of the food (e.g., "apple", "banana")
+
+      Returns:
+          Calorie information per standard serving
+      """
+      # Simple calorie database - in real world, you'd use USDA API
+      calorie_data = {
+          "apple": "80 calories per medium apple (182g)",
+          "banana": "105 calories per medium banana (118g)",
+          "broccoli": "25 calories per 1 cup chopped (91g)",
+          "almonds": "164 calories per 1oz (28g) or about 23 nuts",
+      }
+
+      food_key = food_item.lower()
+      if food_key in calorie_data:
+          return f"{food_item.title()}: {calorie_data[food_key]}"
+      else:
+          return f"I don't have calorie data for {food_item} in my database. Try common foods like apple, chicken breast, or rice."
+#+end_src
+
+Let's test this out:
+
+/The following cell only works before you add the =@function_tool=
+annotation to =get_food_calories= function/
+
+#+begin_src jupyter-python
+  get_food_calories('banana')
+#+end_src
+
+#+RESULTS:
+: Banana: 105 calories per medium banana (118g)
+
+#+begin_src jupyter-python :results silent
+  calorie_agent = Agent(
+      name="Nutrition Assistant",
+      instructions="""
+      You are a helpful nutrition assistant giving out calorie information.
+      You give concise answers.
+      """,
+      tools=[get_food_calories])
+#+end_src
+
+#+begin_src jupyter-python
+  with trace("Nutrition Assistant with tools"):
+      result = await Runner.run(
+          calorie_agent, "How many calories are in total in a banana and an apple?"
+      )
+      print(result.final_output)
+#+end_src
+
+#+RESULTS:
+: Total: 185 calories (banana ~105 + apple ~80) for one medium banana and one medium apple.
+
+#+begin_comment
+Note that the doc string of the tool (here the annotated function
+=get_food_calories=) is important: it tells the LLM what the function is
+used for and helps it figure out when to use the tool.
+
+It is also possible to add instructions to use the tool in the
+=instructions= parameter when creating the agent.
+
+Alternatively, you can also force the agent to use a certain tool by
+passing the =model_settings= parameter, as in the following example:
+#+end_comment
+
+Enforce tools use:
+
+#+begin_src jupyter-python
+calorie_agent = Agent(
+    name="Nutrition Assistant",
+    instructions="""
+    You are a helpful nutrition assistant giving out calorie information.
+    You give concise answers.
+    """,
+    tools=[get_food_calories],
+    model_settings=ModelSettings(tool_choice="get_food_calories"),
+)
+
+with trace("Nutrition Assistant with tools enforced"):
+    result = await Runner.run(
+        calorie_agent, "How many calories are in total in a banana and an apple?"
+    )
+    print(result.final_output)
+#+end_src

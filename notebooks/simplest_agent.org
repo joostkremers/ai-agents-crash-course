@@ -1,0 +1,121 @@
+#+TITLE: Simplest Agent
+#+PROPERTY: header-args:jupyter-python+ :session simplest_agent :kernel ai-agents-crash-course-aJYnLVQA-py3.13 :display plain
+
+* Setup
+
+** Virtual env
+
+#+begin_src emacs-lisp :results silent
+  (pyvenv-workon "ai-agents-crash-course-aJYnLVQA-py3.13")
+#+end_src
+
+* Creating a Simple Agent with Tracing
+:PROPERTIES:
+:CUSTOM_ID: creating-a-simple-agent-with-tracing
+:END:
+
+#+begin_src jupyter-python
+  import dotenv
+  import os
+
+  from openai import OpenAI
+
+  dotenv.load_dotenv()
+
+  if not os.environ.get("OPENAI_API_KEY"):
+      print(
+          """Error: OPENAI_API_KEY environment variable not set. Please copy the .env.template file as .env and fill it in.
+      
+      You can execute these commands in the terminal to get started:
+      cp .env.template .env
+      code .env
+      """
+      )
+
+  # Test OpenAI Access
+  print(
+      OpenAI()
+      .responses.create(
+          model=os.environ["OPENAI_DEFAULT_MODEL"], input="Say: We are up and running!"
+      )
+      .output_text
+  )
+#+end_src
+
+#+RESULTS:
+: We are up and running!
+
+#+begin_src jupyter-python :results silent
+  from agents import Agent, Runner, trace
+  from openai.types.responses import ResponseTextDeltaEvent
+#+end_src
+
+Create a simple Nutrition Assistant Agent
+
+#+begin_src jupyter-python :results silent
+  nutrition_agent = Agent(
+      name="Nutrition Assistant",
+      instructions="""
+      You are a helpful assistant giving out nutrition advice.
+      You give concise answers.
+      """
+  )
+#+end_src
+
+Let's execute the Agent:
+
+#+begin_src jupyter-python :results output
+with trace("Simple Nutrition Agent"):
+    result = await Runner.run(nutrition_agent, "How healthy are bananas?")
+
+print(result)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  RunResult:
+  - Last agent: Agent(name="Nutrition Assistant", ...)
+  - Final output (str):
+      Bananas are a healthy, convenient whole-food option. Key points:
+    
+      - Nutrients: good source of potassium, vitamin B6, vitamin C, and fiber.
+      - Energy: about 105 calories per medium banana; ~14 g sugar, ~3 g fiber.
+      - Gut health: unripe bananas have resistant starch; as they ripen, starch converts to sugar.
+      - Benefits: supports heart health, digestion, and satiety.
+      - Considerations: portion size matters for blood sugar; diabetics may want to pair with protein/fat or monitor portions.
+    
+      Overall, a nutritious snack or part of a meal when eaten in reasonable portions.
+  - 2 new item(s)
+  - 1 raw response(s)
+  - 0 input guardrail result(s)
+  - 0 output guardrail result(s)
+  (See `RunResult` for more details)
+#+end_example
+
+
+Streaming the answer to the screen, token by token
+
+#+begin_src jupyter-python
+  response_stream = Runner.run_streamed(nutrition_agent, "How healthy are bananas?")
+
+  async for event in response_stream.stream_events():
+      if event.type == "raw_response_event" and isinstance(
+          event.data, ResponseTextDeltaEvent
+      ):
+          print(event.data.delta, end="", flush=True)
+#+end_src
+
+#+RESULTS:
+: Bananas are healthy as part of a balanced diet.
+: 
+: Key points:
+: - Nutrition: about 105 calories per medium banana; ~27 g carbs, 3 g fiber, potassium ~420 mg, vitamin B6, vitamin C.
+: - Benefits: supports heart health, digestion, and provides quick energy from natural sugars; convenient and portable.
+: - Considerations: moderate sugar content; GI can vary with ripeness (riper has more sugar). People with kidney disease or on potassium-restricted diets should monitor intake.
+: 
+: Bottom line: a healthy snack in moderation, fits most diets.
+
+
+/Good Job!/
+
+

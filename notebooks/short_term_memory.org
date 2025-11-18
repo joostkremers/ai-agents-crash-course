@@ -1,0 +1,98 @@
+#+TITLE: Short-term Memory
+#+PROPERTY: header-args:jupyter-python+ :session stm :kernel ai-agents-crash-course-aJYnLVQA-py3.13 :display plain
+
+
+* Short-Term Memory
+:PROPERTIES:
+:CUSTOM_ID: short-term-memory
+:END:
+
+#+begin_src jupyter-python
+  import dotenv
+  from agents import Agent, Runner, SQLiteSession, trace
+
+  dotenv.load_dotenv()
+#+end_src
+
+#+RESULTS:
+: True
+
+#+begin_src jupyter-python :results silent
+  nutrition_agent = Agent(
+      name="Nutrition Assistant",
+      instructions="""
+      You are a helpful assistant comparing how healthy different foods are.
+      If you answer, give a list of how healthy the foods are with a score from 1 to 10. Order by: healtiest food comes first.
+
+      Example:
+      Q: Compare X and Y
+      A: X is healtier as Y.
+      1) X: 8/10 - Very healthy but high in fructose
+      2) Y: 3/10 - High in sugar and fat
+      """,
+  )
+#+end_src
+
+** No Memory
+:PROPERTIES:
+:CUSTOM_ID: no-memory
+:END:
+
+#+begin_src jupyter-python
+  result = await Runner.run(nutrition_agent, "Which is healthier, bananas or lollipop?")
+  print(result.final_output)
+#+end_src
+
+#+RESULTS:
+: Bananas are healthier than lollipops.
+: 1) Bananas: 8/10 - Nutrient-dense (fiber, potassium, vitamins); natural sugars.
+: 2) Lollipop: 2/10 - Mostly simple sugar; little to no micronutrients or fiber.
+
+#+begin_src jupyter-python
+  result = await Runner.run(nutrition_agent, "Add apples to the comparison")
+  print(result.final_output)
+#+end_src
+
+#+RESULTS:
+: Please specify which foods to compare apples against (e.g., apples vs oranges, apples vs bananas, etc.). If you’d like, I can compare apples, bananas, and carrots.
+
+** Short Term Memory
+:PROPERTIES:
+:CUSTOM_ID: short-term-memory
+:END:
+
+#+begin_src jupyter-python :results silent
+  session = SQLiteSession("conversation_history")
+#+end_src
+
+#+begin_src jupyter-python
+  result = await Runner.run(
+      nutrition_agent, "Which is healthier, bananas or lollipop?",
+      session=session
+  )
+  print(result.final_output)
+#+end_src
+
+#+RESULTS:
+: 1) Banana: 8/10 - Nutrient-dense, potassium, fiber; natural sugars in balance.
+: 2) Lollipop: 2/10 - Mostly added sugar with little to no nutrients.
+
+#+begin_src jupyter-python
+  with trace("Simple Nutrition Agent"):
+      result = await Runner.run(
+          nutrition_agent, "Add apples to the comparison",
+          session=session
+      )
+
+  print(result.final_output)
+#+end_src
+
+#+RESULTS:
+: 1) Banana: 8/10 - Nutrient-dense, potassium, fiber; natural sugars in balance.
+: 2) Apple: 7/10 - Fiber (including pectin), vitamins; moderate sugar, low calories.
+: 3) Lollipop: 2/10 - Mostly added sugar with little to no nutrients.
+
+#+begin_comment
+Funnily enough, in the video, bananas are rated 7/10, while apples are
+rated 8/10.
+#+end_comment
